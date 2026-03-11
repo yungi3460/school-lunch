@@ -1,110 +1,165 @@
-from flask import Flask, render_template_string
+from flask import Flask, jsonify, render_template_string
 import requests
 from datetime import datetime, timedelta
+import re
 
 app = Flask(__name__)
 
 API_KEY = "82e9dc4cbc6340b2b4e3f5c8a8c56f9c"
-ATPT_CODE = "J10"
-SCHOOL_CODE = "7530189"
+ATPT_OFCDC_SC_CODE = "J10"
+SD_SCHUL_CODE = "7530189"
 
-HTML = """
+
+def get_date(offset):
+    d = datetime.now() + timedelta(days=offset)
+    return d.strftime("%Y%m%d")
+
+
+def get_meal(date):
+
+    url = f"https://open.neis.go.kr/hub/mealServiceDietInfo?KEY={API_KEY}&Type=json&pIndex=1&pSize=10&ATPT_OFCDC_SC_CODE={ATPT_OFCDC_SC_CODE}&SD_SCHUL_CODE={SD_SCHUL_CODE}&MLSV_YMD={date}"
+
+    try:
+        res = requests.get(url).json()
+        meal = res["mealServiceDietInfo"][1]["row"][0]["DDISH_NM"]
+
+        meal = re.sub(r"<br\s*/?>", "\n", meal)
+        meal = meal.replace("(양명)", "")
+
+        return meal
+
+    except:
+        return "급식 정보 없음"
+
+
+@app.route("/meal")
+def meal():
+
+    today = get_meal(get_date(0))
+    tomorrow = get_meal(get_date(1))
+
+    return jsonify({
+        "today": today,
+        "tomorrow": tomorrow
+    })
+
+
+@app.route("/")
+def home():
+
+    return render_template_string("""
+
 <!DOCTYPE html>
 <html>
 <head>
-<title>우리학교 급식</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{
-    font-family: Arial;
-    background:#f4f6f8;
-    text-align:center;
-}
+<meta charset="UTF-8">
+<title>양명고 급식</title>
 
-.container{
-    max-width:500px;
-    margin:auto;
-    background:white;
-    padding:30px;
-    border-radius:15px;
-    box-shadow:0 0 10px rgba(0,0,0,0.1);
+<style>
+
+body{
+font-family:sans-serif;
+text-align:center;
+margin-top:60px;
+background:#f5f5f5;
 }
 
 button{
-    padding:10px 20px;
-    margin:10px;
-    font-size:16px;
-    border:none;
-    border-radius:8px;
-    background:#4CAF50;
-    color:white;
-    cursor:pointer;
+padding:10px 20px;
+margin:5px;
+border:none;
+border-radius:8px;
+background:#4CAF50;
+color:white;
+font-size:16px;
+cursor:pointer;
 }
 
-.menu{
-    margin-top:20px;
-    font-size:20px;
-    line-height:1.8;
+.box{
+width:320px;
+margin:20px auto;
+padding:20px;
+background:white;
+border-radius:12px;
+box-shadow:0 3px 10px rgba(0,0,0,0.1);
 }
+
+#meal{
+white-space:pre-line;
+}
+
 </style>
+
 </head>
 
 <body>
 
-<div class="container">
+<h1>양명고 급식</h1>
 
-<h1>🍱 우리학교 급식</h1>
+<button onclick="showToday()">오늘 급식</button>
+<button onclick="showTomorrow()">내일 급식</button>
 
-<button onclick="location.href='/today'">오늘 급식</button>
-<button onclick="location.href='/tomorrow'">내일 급식</button>
-
-<div class="menu">
-{{menu}}
+<div class="box">
+<p id="meal">불러오는 중...</p>
 </div>
 
-</div>
+<script>
+
+let todayMeal=""
+let tomorrowMeal=""
+
+async function loadMeals(){
+
+const res = await fetch("/meal")
+const data = await res.json()
+
+todayMeal=data.today
+tomorrowMeal=data.tomorrow
+
+document.getElementById("meal").innerText=todayMeal
+
+}
+
+function showToday(){
+
+document.getElementById("meal").innerText=todayMeal
+
+}
+
+function showTomorrow(){
+
+document.getElementById("meal").innerText=tomorrowMeal
+
+}
+
+loadMeals()
+
+function scheduleMidnightRefresh(){
+
+const now=new Date()
+const midnight=new Date()
+
+midnight.setHours(24,0,0,0)
+
+const timeUntilMidnight=midnight-now
+
+setTimeout(()=>{
+
+loadMeals()
+scheduleMidnightRefresh()
+
+},timeUntilMidnight)
+
+}
+
+scheduleMidnightRefresh()
+
+</script>
 
 </body>
 </html>
-"""
 
-def get_menu(date):
+""")
 
-    url = "https://open.neis.go.kr/hub/mealServiceDietInfo"
 
-    params = {
-        "KEY": API_KEY,
-        "Type": "json",
-        "ATPT_OFCDC_SC_CODE": ATPT_CODE,
-        "SD_SCHUL_CODE": SCHOOL_CODE,
-        "MLSV_YMD": date
-    }
-
-    try:
-        res = requests.get(url, params=params)
-        data = res.json()
-        menu = data["mealServiceDietInfo"][1]["row"][0]["DDISH_NM"]
-        menu = menu.replace("<br/>","<br>")
-        return menu
-    except:
-        return "급식 정보가 없습니다"
-
-@app.route("/")
-def home():
-    return render_template_string(HTML, menu="버튼을 눌러 급식을 확인하세요")
-
-@app.route("/today")
-def today():
-    date = datetime.today().strftime("%Y%m%d")
-    menu = get_menu(date)
-    return render_template_string(HTML, menu=menu)
-
-@app.route("/tomorrow")
-def tomorrow():
-    date = (datetime.today() + timedelta(days=1)).strftime("%Y%m%d")
-    menu = get_menu(date)
-    return render_template_string(HTML, menu=menu)
-
-if __name__ == "__main__":
-
-    app.run(host="0.0.0.0", port=10000)
+app.run(debug=True)
